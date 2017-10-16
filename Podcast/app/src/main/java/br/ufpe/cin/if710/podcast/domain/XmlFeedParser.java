@@ -92,7 +92,6 @@ public class XmlFeedParser {
         return result;
     }
 
-    // Processa tags de forma parametrizada no feed.
     public static String readData(XmlPullParser parser, String tag)
             throws IOException, XmlPullParserException {
         parser.require(XmlPullParser.START_TAG, null, tag);
@@ -111,12 +110,10 @@ public class XmlFeedParser {
         return result;
     }
 
-    // Processa tags do tipo <enclosure> para obter dados do episodio
     public static String readEnclosure(XmlPullParser parser)
             throws IOException, XmlPullParserException {
         return parser.getAttributeValue(0);
     }
-
 
     public static void skip(XmlPullParser parser) throws XmlPullParserException, IOException {
         if (parser.getEventType() != XmlPullParser.START_TAG) {

@@ -1,9 +1,19 @@
 package br.ufpe.cin.if710.podcast.ui;
 
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
-import android.os.AsyncTask;
+import android.content.IntentFilter;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -11,28 +21,33 @@ import android.widget.AdapterView;
 import android.widget.ListView;
 import android.widget.Toast;
 
-import org.xmlpull.v1.XmlPullParserException;
-
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.io.File;
 import java.util.ArrayList;
-import java.util.List;
 
 import br.ufpe.cin.if710.podcast.R;
+import br.ufpe.cin.if710.podcast.db.PodcastProviderContract;
 import br.ufpe.cin.if710.podcast.domain.ItemFeed;
-import br.ufpe.cin.if710.podcast.domain.XmlFeedParser;
+import br.ufpe.cin.if710.podcast.service.XMLDownloadService;
 import br.ufpe.cin.if710.podcast.ui.adapter.XmlFeedAdapter;
 
 public class MainActivity extends Activity {
 
     //ao fazer envio da resolucao, use este link no seu codigo!
     private final String RSS_FEED = "http://leopoldomt.com/if710/fronteirasdaciencia.xml";
+
+
     //TODO teste com outros links de podcast
 
+    private static final int MY_NOTIFICATION_ID = 5;
+
+    public static final String DOWNLOAD_COMPLETE = "br.ufpe.cin.if710.podcast.action.DOWNLOAD_COMPLETE";
+    public static final String DOWNLOAD_XML_COMPLETE = "br.ufpe.cin.if710.podcast.action.XMLDOWNLOADED";
+    public static final String PAUSE_EPISODE = "br.ufpe.cin.if710.podcast.action.PAUSE_EPISODE";
+    public static final String END_EPISODE = "br.ufpe.cin.if710.podcast.action.END_EPISODE";
+    public static final String RSS_FEED_PUBLIC = "http://leopoldomt.com/if710/fronteirasdaciencia.xml";
+
     private ListView items;
+    boolean isPrimeiroPlano = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,6 +55,46 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         items = (ListView) findViewById(R.id.items);
+        items.setTextFilterEnabled(true);
+        items.setClickable(true);
+
+        items.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                XmlFeedAdapter adapter = (XmlFeedAdapter) parent.getAdapter();
+                ItemFeed itemFeed = adapter.getItem(position);
+
+                Intent i = new Intent(getApplicationContext(), EpisodeDetailActivity.class);
+                Bundle bundle = new Bundle();
+                bundle.putSerializable("Item", itemFeed);
+                i.putExtras(bundle);
+                startActivity(i);
+            }
+        });
+    }
+
+    private void tela(){
+
+        Cursor c = getContentResolver().query(PodcastProviderContract.EPISODE_LIST_URI, null, null, null, null);
+        ArrayList<ItemFeed> itemFeed = new ArrayList<>();
+        while (c.moveToNext()) {
+            String title = c.getString(c.getColumnIndex(PodcastProviderContract.EPISODE_TITLE));
+            String link = c.getString(c.getColumnIndex(PodcastProviderContract.EPISODE_LINK));
+            String pubDate = c.getString(c.getColumnIndex(PodcastProviderContract.EPISODE_DATE));
+            String description = c.getString(c.getColumnIndex(PodcastProviderContract.EPISODE_DESC));
+            String downloadLink = c.getString(c.getColumnIndex(PodcastProviderContract.EPISODE_DOWNLOAD_LINK));
+            String uriString = c.getString(c.getColumnIndex(PodcastProviderContract.EPISODE_FILE_URI));
+
+            ItemFeed item = new ItemFeed(title, link, pubDate, description, downloadLink);
+            item.setFileUri(uriString);
+            itemFeed.add(item);
+        }
+
+        //Adapter Personalizado
+        XmlFeedAdapter adapter = new XmlFeedAdapter(getApplicationContext(), R.layout.itemlista, itemFeed);
+
+        //atualizar o list view
+        items.setAdapter(adapter);
     }
 
     @Override
@@ -64,81 +119,142 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        isPrimeiroPlano = true;
+        super.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        isPrimeiroPlano = false;
+        super.onPause();
+    }
+
+    @Override
     protected void onStart() {
+        isPrimeiroPlano = true;
         super.onStart();
-        new DownloadXmlTask().execute(RSS_FEED);
+
+        tela();
+        registerReceiver(downloadCompleto, new IntentFilter(DOWNLOAD_COMPLETE));
+        registerReceiver(pauseEpisode, new IntentFilter(PAUSE_EPISODE));
+        registerReceiver(endEpisode, new IntentFilter(END_EPISODE));
+        registerReceiver(downloadXMLComplete, new IntentFilter(DOWNLOAD_XML_COMPLETE));
+        Intent downloadXMLService = new Intent(getApplicationContext(), XMLDownloadService.class);
+        Bundle bundle = new Bundle();
+        bundle.putSerializable("rss", RSS_FEED);
+        downloadXMLService.putExtras(bundle);
+        getApplicationContext().startService(downloadXMLService);
     }
 
     @Override
     protected void onStop() {
+        isPrimeiroPlano = false;
         super.onStop();
         XmlFeedAdapter adapter = (XmlFeedAdapter) items.getAdapter();
         adapter.clear();
     }
 
-    private class DownloadXmlTask extends AsyncTask<String, Void, List<ItemFeed>> {
-        @Override
-        protected void onPreExecute() {
-            Toast.makeText(getApplicationContext(), "iniciando...", Toast.LENGTH_SHORT).show();
-        }
-
-        @Override
-        protected List<ItemFeed> doInBackground(String... params) {
-            List<ItemFeed> itemList = new ArrayList<>();
-            try {
-                itemList = XmlFeedParser.parse(getRssFeed(params[0]));
-            } catch (IOException e) {
-                e.printStackTrace();
-            } catch (XmlPullParserException e) {
-                e.printStackTrace();
-            }
-            return itemList;
-        }
-
-        @Override
-        protected void onPostExecute(List<ItemFeed> feed) {
-            Toast.makeText(getApplicationContext(), "terminando...", Toast.LENGTH_SHORT).show();
-
-            //Adapter Personalizado
-            XmlFeedAdapter adapter = new XmlFeedAdapter(getApplicationContext(), R.layout.itemlista, feed);
-
-            //atualizar o list view
-            items.setAdapter(adapter);
-            items.setTextFilterEnabled(true);
-            /*
-            items.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-                @Override
-                public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                    XmlFeedAdapter adapter = (XmlFeedAdapter) parent.getAdapter();
-                    ItemFeed item = adapter.getItem(position);
-                    String msg = item.getTitle() + " " + item.getLink();
-                    Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_SHORT).show();
-                }
-            });
-            /**/
-        }
+    @Override
+    protected void onDestroy() {
+        isPrimeiroPlano = false;
+        super.onDestroy();
+        unregisterReceiver(downloadCompleto);
+        unregisterReceiver(pauseEpisode);
+        unregisterReceiver(endEpisode);
+        unregisterReceiver(downloadXMLComplete);
     }
 
-    //TODO Opcional - pesquise outros meios de obter arquivos da internet
-    private String getRssFeed(String feed) throws IOException {
-        InputStream in = null;
-        String rssFeed = "";
-        try {
-            URL url = new URL(feed);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            in = conn.getInputStream();
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[1024];
-            for (int count; (count = in.read(buffer)) != -1; ) {
-                out.write(buffer, 0, count);
-            }
-            byte[] response = out.toByteArray();
-            rssFeed = new String(response, "UTF-8");
-        } finally {
-            if (in != null) {
-                in.close();
-            }
+    BroadcastReceiver downloadCompleto = new BroadcastReceiver() {
+        public void onReceive(Context context, Intent intent) {
+            Toast.makeText(context, "Download Completo", Toast.LENGTH_SHORT).show();
+
+            Bundle params = intent.getExtras();
+            ItemFeed itemFeed = (ItemFeed)params.get("Item");
+
+            ContentResolver cr = getContentResolver();
+            ContentValues cv = new ContentValues();
+            cv.put(PodcastProviderContract.EPISODE_FILE_URI, params.get("uri").toString());
+            String selection = PodcastProviderContract.EPISODE_TITLE + " = ?";
+            String[] selectionArgs = new String[]{itemFeed.getTitle()};
+            cr.update(PodcastProviderContract.EPISODE_LIST_URI, cv, selection, selectionArgs);
+            downloadNotification(true, "Download Realizado com Sucesso!", "");
         }
-        return rssFeed;
+    };
+
+    BroadcastReceiver pauseEpisode = new BroadcastReceiver() {
+        public void onReceive(Context context, Intent intent) {
+
+            Bundle params = intent.getExtras();
+            ItemFeed itemFeed = (ItemFeed)params.get("Item");
+
+            ContentResolver cr = getContentResolver();
+            ContentValues cv = new ContentValues();
+            cv.put(PodcastProviderContract.EPISODE_TIME_PAUSED, itemFeed.getTimePaused());
+            String selection = PodcastProviderContract.EPISODE_TITLE + " = ?";
+            String[] selectionArgs = new String[]{itemFeed.getTitle()};
+            cr.update(PodcastProviderContract.EPISODE_LIST_URI, cv, selection, selectionArgs);
+            tela();
+        }
+    };
+
+    BroadcastReceiver endEpisode = new BroadcastReceiver() {
+        public void onReceive(Context context, Intent intent) {
+
+            Bundle params = intent.getExtras();
+            ItemFeed itemFeed = (ItemFeed)params.get("Item");
+
+            File root = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            root.mkdirs();
+            Uri uri = Uri.parse(itemFeed.getDownloadLink());
+            File output = new File(root, uri.getLastPathSegment());
+            if (output.exists()) {
+                output.delete();
+            }
+
+            ContentResolver cr = getContentResolver();
+            ContentValues cv = new ContentValues();
+            cv.put(PodcastProviderContract.EPISODE_TIME_PAUSED, 0);
+            cv.put(PodcastProviderContract.EPISODE_FILE_URI, "");
+            String selection = PodcastProviderContract.EPISODE_TITLE + " = ?";
+            String[] selectionArgs = new String[]{itemFeed.getTitle()};
+            cr.update(PodcastProviderContract.EPISODE_LIST_URI, cv, selection, selectionArgs);
+            tela();
+        }
+    };
+
+    BroadcastReceiver downloadXMLComplete = new BroadcastReceiver() {
+        public void onReceive(Context context, Intent intent) {
+
+            Bundle params = intent.getExtras();
+            boolean atualizou = (Boolean) params.get("atualizou");
+
+            downloadNotification(atualizou, "Lista de Podcasts Atualizada", "");
+        }
+    };
+
+    private void downloadNotification(Boolean atualizar, String title, String text){
+        View rootView = getWindow().getDecorView().getRootView();
+
+        if (rootView.isShown()){
+            if (atualizar){
+                tela();
+            }
+        }else {
+            final Intent notificationIntent = new Intent(getApplicationContext(), MainActivity.class);
+            final PendingIntent pendingIntent = PendingIntent.getActivity(getApplicationContext(), 0, notificationIntent, 0);
+
+            final Notification notification = new Notification.Builder(
+                    getApplicationContext())
+                    .setSmallIcon(android.R.drawable.btn_star)
+                    .setAutoCancel(true)
+                    .setOngoing(true).setContentTitle(title)
+                    .setContentText(text)
+                    .setContentIntent(pendingIntent)
+                    .build();
+
+            NotificationManager notificationManager = (NotificationManager)getApplicationContext().getSystemService(NOTIFICATION_SERVICE);
+            notificationManager.notify(MY_NOTIFICATION_ID, notification);
+        }
     }
 }

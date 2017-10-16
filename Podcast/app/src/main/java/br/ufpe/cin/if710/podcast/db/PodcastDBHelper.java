@@ -1,7 +1,6 @@
 package br.ufpe.cin.if710.podcast.db;
 
 import android.content.Context;
-import android.database.DatabaseErrorHandler;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
@@ -15,13 +14,13 @@ public class PodcastDBHelper extends SQLiteOpenHelper {
         super(context, DATABASE_NAME, null, DB_VERSION);
     }
 
-    private static PodcastDBHelper db;
+    private static PodcastDBHelper myHelper;
 
     public static PodcastDBHelper getInstance(Context c) {
-        if (db==null) {
-            db = new PodcastDBHelper(c.getApplicationContext());
+        if (myHelper ==null) {
+            myHelper = new PodcastDBHelper(c.getApplicationContext());
         }
-        return db;
+        return myHelper;
     }
 
     public final static String _ID = "_id";
@@ -31,10 +30,11 @@ public class PodcastDBHelper extends SQLiteOpenHelper {
     public final static String EPISODE_DESC = "description";
     public final static String EPISODE_DOWNLOAD_LINK = "downloadLink";
     public final static String EPISODE_FILE_URI = "downloadUri";
+    public final static String EPISODE_TIME_PAUSED = "timePaused";
 
     public final static String[] columns = {
-            _ID, EPISODE_TITLE, EPISODE_DATE, EPISODE_LINK,
-            EPISODE_DESC, EPISODE_DOWNLOAD_LINK, EPISODE_FILE_URI
+            _ID, EPISODE_TITLE, EPISODE_DATE, EPISODE_LINK, EPISODE_DESC, EPISODE_DOWNLOAD_LINK,
+            EPISODE_FILE_URI, EPISODE_TIME_PAUSED
     };
     final private static String CREATE_CMD =
             "CREATE TABLE "+DATABASE_TABLE+" (" + _ID
@@ -44,7 +44,8 @@ public class PodcastDBHelper extends SQLiteOpenHelper {
                     + EPISODE_LINK + " TEXT NOT NULL, "
                     + EPISODE_DESC + " TEXT NOT NULL, "
                     + EPISODE_DOWNLOAD_LINK + " TEXT NOT NULL, "
-                    + EPISODE_FILE_URI + " TEXT NOT NULL)";
+                    + EPISODE_FILE_URI + " TEXT, "
+                    + EPISODE_TIME_PAUSED + " INTEGER);";
 
 
 
@@ -54,7 +55,7 @@ public class PodcastDBHelper extends SQLiteOpenHelper {
     }
 
     @Override
-    public void onUpgrade(SQLiteDatabase sqLiteDatabase, int i, int i1) {
-        throw new RuntimeException("inutilizado");
+    public void onUpgrade(SQLiteDatabase sqLiteDatabase, int i, int j) {
+        throw new RuntimeException("sem uso");
     }
 }
